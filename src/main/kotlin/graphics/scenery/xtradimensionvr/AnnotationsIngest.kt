@@ -4,6 +4,7 @@ import ch.systemsx.cisd.base.mdarray.MDFloatArray
 import ch.systemsx.cisd.base.mdarray.MDIntArray
 import ch.systemsx.cisd.hdf5.HDF5Factory
 import ch.systemsx.cisd.hdf5.IHDF5Reader
+import graphics.scenery.Mesh
 import graphics.scenery.numerics.Random
 import hdf.hdf5lib.exceptions.HDF5SymbolTableException
 import java.util.*
@@ -81,7 +82,6 @@ class AnnotationsIngest(h5adPath: String) {
             throw InputMismatchException("this function is only for reading obs, var, and uns")
 
         val data = ArrayList<Any>()
-        var type = ""
         val categoryMap = hashMapOf<Int, String>()
         val annotation = hdfPath.substring(5) // returns just the annotation requested
 
@@ -89,7 +89,6 @@ class AnnotationsIngest(h5adPath: String) {
             reader.getDataSetInformation(hdfPath).toString().contains("STRING") -> {// String
                 for (i in reader.string().readArray(hdfPath))
                     data.add(i)
-                type = "String"
             }
             reader.getDataSetInformation(hdfPath).toString().contains("INTEGER(1)") && asString ->
                 try {
@@ -98,50 +97,55 @@ class AnnotationsIngest(h5adPath: String) {
 
                     for (i in reader.int8().readArray(hdfPath))
                         categoryMap[i.toInt()]?.let { data.add(it) }
-                    type = "String"
 
                 } catch (e: HDF5SymbolTableException) { // int8 but not mapped to categorical
                     for (i in reader.int8().readArray(hdfPath))
                         categoryMap[i.toInt()]?.let { data.add(it) }
-                    type = "Byte"
                 }
             reader.getDataSetInformation(hdfPath).toString().contains("INTEGER(1)") && !asString -> {// Byte
                 for (i in reader.int8().readArray(hdfPath))
                     data.add(i)
-                type = "Byte"
             }
             reader.getDataSetInformation(hdfPath).toString().contains("INTEGER(2)") -> {// Short
                 for (i in reader.int16().readArray(hdfPath))
                     data.add(i)
-                type = "Short"
             }
             reader.getDataSetInformation(hdfPath).toString().contains("INTEGER(4)") -> {// Int
                 for (i in reader.int32().readArray(hdfPath))
                     data.add(i)
-                type = "Int"
             }
             reader.getDataSetInformation(hdfPath).toString().contains("INTEGER(8)") -> {// Long
                 for (i in reader.int64().readArray(hdfPath))
                     data.add(i)
-                type = "Long"
                 }
             reader.getDataSetInformation(hdfPath).toString().contains("FLOAT(4)") -> {// Float
                 for (i in reader.float32().readArray(hdfPath))
                     data.add(i)
-                type = "Float"
                 }
             reader.getDataSetInformation(hdfPath).toString().contains("FLOAT(8)") -> {// Double
                 for (i in reader.float64().readArray(hdfPath))
                     data.add(i)
-                type = "Double"
                 }
             reader.getDataSetInformation(hdfPath).toString().contains("BOOLEAN") -> {// Boolean
                 for (i in reader.int8().readArray(hdfPath))
                     data.add(i)
-                type = "Bool"
                 }
         }
         return data
+    }
+
+    fun fetchMostExpressedGenes(cells: ArrayList<Mesh>, numGenes: Int) {
+        val cellIndices = cells.map { it.name.toInt() }
+        val geneExpressions: ArrayList<HashMap<String, Float>> = cellIndices.run {
+            this.forEach {
+                for (i in 0..numGenes) {
+
+                }
+            }
+
+
+            ArrayList<HashMap<String, Float>>()
+        }
     }
 
     /**

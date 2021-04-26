@@ -14,6 +14,7 @@ import kotlin.concurrent.thread
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.ceil
 import hdf.hdf5lib.exceptions.HDF5SymbolTableException
+import net.ericaro.neoitertools.Lambda
 
 /**.
  * cellxgene interactivity - start fixing selection and marking tools
@@ -35,30 +36,16 @@ import hdf.hdf5lib.exceptions.HDF5SymbolTableException
  * @author Luke Hyman <lukejhyman@gmail.com>
  */
 
-class XPlot : Node() {
+var geneNames = ArrayList<String>()
+var geneExpr = ArrayList<FloatArray>()
 
-    val laser = Cylinder(0.01f, 2.0f, 20)
-    val laser2 = Cylinder(0.01f, 2.0f, 20)
-
-    // define meshes that make up the scene
-    var dotMesh = Mesh()
-    var textBoardMesh = Mesh()
-    val geneScaleMesh = Mesh()
-
+class XPlot(filePath: String) : Node() {
     // a scaling factor for better scale relative to user
     private var positionScaling = 0.3f
+    private val colormap = Colormap.get(encoding)
 
-    // global as it is required by Visualization class
-    var genePicker = 0
-    var annotationPicker = 0
-    var annotationMode = true
-
-    val geneBoard = TextBoard()
-//    var geneNames = ArrayList<String>() // stores ordered gene names for gene board
-//    var geneExpr = ArrayList<FloatArray>()
-
-    private val annFetcher =
-        AnnotationsIngest("/home/luke/PycharmProjects/VRCaller/file_conversion/bbknn_processed.h5ad")
+    val annFetcher =
+        AnnotationsIngest(filePath)
     private val spatialCoords = annFetcher.umapReader3D()
 
     var annotationList = ArrayList<String>()
@@ -66,8 +53,8 @@ class XPlot : Node() {
 
     // give annotations you would like (maybe with checkboxes, allow to enter the names of their annotations)
     // list of annotations
-    init{
-        for (ann in annFetcher.reader.getGroupMembers("/obs")){
+    init {
+        for (ann in annFetcher.reader.getGroupMembers("/obs")) {
             try {
                 val info = annFetcher.reader.getDataSetInformation("/uns/" + ann + "_categorical")
                 if (info.toString().toCharArray().size < 17)
@@ -80,13 +67,13 @@ class XPlot : Node() {
             }
         }
         println(annotationList)
-
     }
-    //[age, batch, cell, cell_ontology_class, cell_ontology_id, free_annotation, leiden, louvain, method, mouse.id, sex, subtissue, tissue, tissue_FACS_droplet, tissue_free_annotation]
 
     private var annotationArray = ArrayList<FloatArray>() //used to color spheres, normalized
     private val rawAnnotations = ArrayList<ArrayList<*>>()
-    private val typeList = ArrayList<String>() //grow list of annotation datatypes (used currently for metadata check for labels)
+    private val metaOnlyRawAnnotations = ArrayList<ArrayList<*>>()
+    private val typeList =
+        ArrayList<String>() //grow list of annotation datatypes (used currently for metadata check for labels)
 
     val annKeyList = ArrayList<Mesh>()
     val labelList = ArrayList<Mesh>()
@@ -95,7 +82,7 @@ class XPlot : Node() {
     init {
         for (ann in annotationList) {
 
-            annotationArray.add( run {
+            annotationArray.add(run {
                 val raw = annFetcher.h5adAnnotationReader("/obs/$ann", false)
 
                 rawAnnotations.add(raw) // used to attach metadata spheres
@@ -121,8 +108,10 @@ class XPlot : Node() {
                 }
                 norm
             })
-            annKeyList.add(createSphereKey(ann))
+//            annKeyList.add(createSphereKey(ann))
         }
+        for (ann in metaOnlyAnnList)
+            metaOnlyRawAnnotations.add(annFetcher.h5adAnnotationReader("/obs/$ann", false))
     }
 
     //generate master spheres for every 10k cells for performance
@@ -130,25 +119,17 @@ class XPlot : Node() {
     private val masterCount = ceil(spatialCoords.size.toFloat() / masterSplit).toInt()
     val masterMap = hashMapOf<Int, Icosphere>()
 
-    // initialize gene color map from scenery.Colormap
-    private val encoding = "hot"
-    private val colormap = Colormap.get(encoding)
-
     private val indexedGeneExpression = ArrayList<Float>()
     private val indexedAnnotations = ArrayList<Float>()
 
-    var geneNames = ArrayList<String>()
-    var geneExpr = ArrayList<FloatArray>()
-
     init {
-        val (geneNameBuffer, geneExprBuffer) = annFetcher.fetchGeneExpression()
-        geneNames = geneNameBuffer
-        geneExpr = geneExprBuffer
+        val buffer = annFetcher.fetchGeneExpression()
+        geneNames = buffer.first
+        geneExpr = buffer.second
 
-        loadEnvironment()
         loadDataset()
         updateInstancingColor()
-        annKeyList[0].visible = true
+//        annKeyList[0].visible = true
     }
 
     private fun loadDataset() {
@@ -156,7 +137,7 @@ class XPlot : Node() {
         // hashmap to emulate at run time variable declaration
         // allows for dynamically growing number of master spheres with size of dataset
         for (i in 1..masterCount) {
-            val masterTemp = Icosphere(0.012f * positionScaling, 1) // sphere properties
+            val masterTemp = Icosphere(0.02f * positionScaling, 1) // sphere properties
             masterMap[i] = addMasterProperties(masterTemp, i)
         }
         logger.info("hashmap looks like: $masterMap")
@@ -176,13 +157,16 @@ class XPlot : Node() {
 
             val s = Mesh()
 
-            for ((annCount, annotation) in annotationList.withIndex()) { //add all annotations as metadata (for label center of mass)
+            for ((annCount, annotation) in annotationList.withIndex())  //add all annotations as metadata (for label center of mass)
                 s.metadata[annotation] = rawAnnotations[annCount][counter]
-            }
 
+            for ((annCount, annotation) in metaOnlyAnnList.withIndex())
+                s.metadata[annotation] = metaOnlyRawAnnotations[annCount][counter]
+
+            s.name = "$counter" // used to identify row of the cell
             s.parent = masterMap[parentIterator]
             s.position =
-                (Vector3f((coord[0] - center[0]), (coord[1] - center[1]), (coord[2] - center[2]))) * positionScaling
+                (Vector3f((coord[0] - center[0]), (coord[1] - center[1] + 10f), (coord[2] - center[2]))) * positionScaling
             s.instancedProperties["ModelMatrix"] = { s.world }
             masterMap[parentIterator]?.instances?.add(s)
             resettingCounter++
@@ -190,9 +174,9 @@ class XPlot : Node() {
         addChild(dotMesh)
 
         // create labels for each annotation
-        for ((typeCount, annotation) in annotationList.withIndex())
-            labelList.add(generateLabels(annotation, typeList[typeCount]))
-
+//        for ((typeCount, annotation) in annotationList.withIndex())
+//            labelList.add(generateLabels(annotation, typeList[typeCount]))
+        addChild(textBoardMesh)
     }
 
     fun updateInstancingColor() {
@@ -219,7 +203,6 @@ class XPlot : Node() {
 
             var color = if (annotationMode) {
                 rgbColorSpectrum.sample(indexedAnnotations[annotationPicker])
-
             } else {
                 colormap.sample(indexedGeneExpression[genePicker] / 10f)
             }
@@ -227,88 +210,15 @@ class XPlot : Node() {
             if (s.metadata["selected"] == true)
                 color = s.material.diffuse.xyzw()
 
-            s.instancedProperties["Color"] = { color }
+            val colorCopy = color
+
+            s.instancedProperties["Color"] = { colorCopy }
 
             resettingCounter++
         }
         for (master in 1..masterCount) {
             (masterMap[master]?.metadata?.get("MaxInstanceUpdateCount") as AtomicInteger).getAndIncrement()
         }
-    }
-
-    private fun loadEnvironment() {
-        // add box to scene for sense of bound
-        val boxSize = 25.0f
-        val lightbox = Box(Vector3f(boxSize, boxSize, boxSize), insideNormals = true)
-        lightbox.name = "Lightbox"
-        lightbox.material.diffuse = Vector3f(0.4f, 0.4f, 0.4f)
-        lightbox.material.roughness = 1.0f
-        lightbox.material.metallic = 0.0f
-        lightbox.material.cullingMode = Material.CullingMode.Front
-        addChild(lightbox)
-
-        val lightStretch = 12.4f
-        val lights = (0 until 10).map {
-            val l = PointLight(radius = 50.0f)
-            l.position = Vector3f(
-                Random.randomFromRange(-lightStretch, lightStretch),
-                Random.randomFromRange(-lightStretch, lightStretch),
-                Random.randomFromRange(-lightStretch, lightStretch)
-            )
-//            l.emissionColor = Random.random3DVectorFromRange(0.2f, 0.8f)
-            l.emissionColor = Vector3f(1f, 1f, 1f)
-            l.intensity = 1f
-
-            l
-        }
-        lights.forEach { addChild(it) }
-
-        //text board displaying name of gene currently encoded as colormap. Disappears if color encodes cell type
-        geneBoard.transparent = 1
-        geneBoard.fontColor = Vector3f(0f, 0f, 0f).xyzw()
-        geneBoard.position = Vector3f(-2.5f, 1.5f, -12.4f) // on far wall
-        geneBoard.scale = Vector3f(1f, 1f, 1f)
-        geneScaleMesh.addChild(geneBoard)
-
-        // create cylinders orthogonal to each other, representing axes centered around 0,0,0 and add them to the scene
-        val x = generateAxis("X", 5.00f)
-        addChild(x)
-        val y = generateAxis("Y", 5.00f)
-        addChild(y)
-        val z = generateAxis(
-            "Z", 5.00f
-        )
-        addChild(z)
-
-        // give lasers texture and set them to be visible (could use to have different lasers/colors/styles and switch between them)
-        initializeLaser(laser)
-        initializeLaser(laser2)
-
-        val colorMapScale = Box(Vector3f(5.0f, 1.0f, 0f))
-        val maxTick = TextBoard()
-        val minTick = TextBoard()
-
-        colorMapScale.material.textures["diffuse"] =
-            Texture.fromImage(Image.fromResource("volumes/colormap-$encoding.png", this::class.java))
-        colorMapScale.material.metallic = 0.3f
-        colorMapScale.material.roughness = 0.9f
-        colorMapScale.position = Vector3f(0f, 3f, -12.4f)
-        geneScaleMesh.addChild(colorMapScale)
-
-        minTick.text = "0"
-        minTick.transparent = 1
-        minTick.fontColor = Vector3f(0.03f, 0.03f, 0.03f).xyzw()
-        minTick.position = Vector3f(-2.5f, 3.5f, -12.4f)
-        geneScaleMesh.addChild(minTick)
-
-        maxTick.text = "10"
-        maxTick.transparent = 1
-        maxTick.fontColor = Vector3f(0.03f, 0.03f, 0.03f).xyzw()
-        maxTick.position = Vector3f(2.1f, 3.5f, -boxSize / 2 + 0.1f)
-        geneScaleMesh.addChild(maxTick)
-
-        geneScaleMesh.visible = false
-        addChild(geneScaleMesh)
     }
 
     private fun generateLabels(annotation: String, type: String): Mesh {
@@ -327,13 +237,13 @@ class XPlot : Node() {
                 "Byte" -> t.position = fetchCellLabelPosition(annotation, count.toByte())
                 "Short" -> t.position = fetchCellLabelPosition(annotation, count.toShort())
             }
-            t.scale = Vector3f(0.2f, 0.2f, 0.2f) * positionScaling
+            t.scale = Vector3f(0.3f, 0.3f, 0.3f) * positionScaling
             t.addChild(Sphere(0.1f, 1))
             m.addChild(t)
         }
 
         m.visible = false
-        addChild(m)
+        textBoardMesh.addChild(m)
         return m
     }
 
@@ -380,7 +290,7 @@ class XPlot : Node() {
         val mapping = annFetcher.h5adAnnotationReader("/uns/" + annotation + "_categorical")
 
         val rootPosY = 10f
-        val rootPosX = -10.5f
+        val rootPosX = -5.5f
         val scale = 0.6f
 
         val sizeList = arrayListOf<Int>()
@@ -407,7 +317,7 @@ class XPlot : Node() {
         title.transparent = 1
         title.text = annotation
         title.scale = Vector3f(scale * 2)
-        title.fontColor = Vector3f(0f, 0f, 0f).xyzw()
+        title.fontColor = Vector3f(180/255f, 23/255f, 52/255f).xyzw()
         title.position = Vector3f(rootPosX + scale, rootPosY, -11f)
         m.addChild(title)
 
@@ -426,7 +336,7 @@ class XPlot : Node() {
                     key.text = cat.toString().replace("ï", "i") // not utf-8 -_-
             }
 
-            key.fontColor = Vector3f(0f, 0f, 0f).xyzw()
+            key.fontColor = Vector3f(1f, 1f, 1f).xyzw()
             key.transparent = 1
             key.scale = Vector3f(scale)
 
@@ -458,7 +368,7 @@ class XPlot : Node() {
                 overflow = 0
                 charSum += if (sizeList[lenIndex] < 12) 18
                 else sizeList[lenIndex]
-                
+
             }
         }
         m.visible = false
@@ -484,8 +394,8 @@ class XPlot : Node() {
         ) //overrides the shader
         master.material.ambient = Vector3f(0.3f, 0.3f, 0.3f)
         master.material.specular = Vector3f(0.1f, 0.1f, 0.1f)
-        master.material.roughness = 0.19f
-        master.material.metallic = 0.0001f
+//        master.material.roughness = 0.6f
+//        master.material.metallic = 0.8f //0.0001f
         master.instancedProperties["ModelMatrix"] = { master.world }
         master.instancedProperties["Color"] = { master.material.diffuse.xyzw() }
 
@@ -494,32 +404,8 @@ class XPlot : Node() {
         return master
     }
 
-    private fun initializeLaser(laserName: Cylinder) {
-        laserName.material.diffuse = Vector3f(0.9f, 0.0f, 0.0f)
-        laserName.material.metallic = 0.001f
-        laserName.material.roughness = 0.18f
-        laserName.rotation.rotateX(-Math.PI.toFloat() / 1.5f) // point laser forwards
-        laserName.visible = true
-    }
 
-    private fun generateAxis(dimension: String = "x", length: Float = 5.00f): Cylinder {
-        val cyl: Cylinder = when (dimension.capitalize()) {
-            "X" -> {
-                Cylinder.betweenPoints(Vector3f(-length, 0f, 0f), Vector3f(length, 0f, 0f), radius = 0.01f)
-            }
-            "Y" -> {
-                Cylinder.betweenPoints(Vector3f(0f, -length, 0f), Vector3f(0f, length, 0f), radius = 0.01f)
-            }
-            "Z" -> {
-                Cylinder.betweenPoints(Vector3f(0f, 0f, -length), Vector3f(0f, 0f, length), radius = 0.01f)
-            }
-            else -> throw IllegalArgumentException("$dimension is not a valid dimension")
-        }
-        cyl.material.roughness = 0.18f
-        cyl.material.metallic = 0.001f
-        cyl.material.diffuse = Vector3f(1.0f, 1.0f, 1.0f)
-        return cyl
-    }
+
 
     fun resetVisibility() {
         for (i in 0..masterMap.size) {
@@ -527,24 +413,6 @@ class XPlot : Node() {
                 it.visible = true
                 it.metadata.remove("selected")
             }
-        }
-    }
-
-    fun loadNewGenes() {
-        thread {
-            Thread.currentThread().priority = Thread.MIN_PRIORITY
-
-            geneBoard.text = "fetching..."
-
-            val (geneNameBuffer, geneExprBuffer) = annFetcher.fetchGeneExpression()
-            genePicker = 0
-            geneNames.clear()
-            geneExpr.clear()
-            geneNames = geneNameBuffer
-            geneExpr = geneExprBuffer
-
-            updateInstancingColor()
-            geneBoard.text = "Gene: " + geneNames[genePicker]
         }
     }
 }
